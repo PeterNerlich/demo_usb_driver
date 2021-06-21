@@ -1,0 +1,42 @@
+---
+- hosts: all
+  tasks:
+    - name: Install dependencies
+      apt:
+        pkg:
+          - git
+          #- g++
+          - make
+          #- libc6-dev
+          #- libbz2-dev
+          #- libxxf86vm-dev
+          #- libcurl4-gnutls-dev
+          #- zlib1g-dev
+          #- libgmp-dev
+        update_cache: true
+        cache_valid_time: 86400  # One day
+      become: true
+
+    - name: Pull newest changes
+      ansible.builtin.git:
+        repo: "https://github.com/PeterNerlich/demo_usb_driver.git"
+        dest: "~/module"
+        force: true
+      become: true
+
+    - name: Compile kernel module
+      community.general.make:
+        chdir: "~/module"
+      become: true
+
+    - name: Remove kernel module
+      command:
+        cmd: "rmmod reduced.ko"
+        chdir: "~/module/src"
+      failed_when: "'XXX' in result.stderr"
+
+    - name: Load kernel module
+      command:
+        cmd: "insmod reduced.ko"
+        chdir: "~/module/src"
+      failed_when: "'No such file or directory' in result.stderr"
