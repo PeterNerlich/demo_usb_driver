@@ -10,25 +10,19 @@
       apt:
         pkg:
           - git
-          #- g++
           - make
-          #- libc6-dev
-          #- libbz2-dev
-          #- libxxf86vm-dev
-          #- libcurl4-gnutls-dev
-          #- zlib1g-dev
-          #- libgmp-dev
           - "linux-headers-{{ kernel.stdout }}"
         update_cache: true
         cache_valid_time: 86400  # One day
       become: true
 
-    - name: Pull newest changes
-      ansible.builtin.git:
-        repo: https://github.com/PeterNerlich/demo_usb_driver.git
-        dest: "/home/{{ ansible_env.USER }}/demo_usb_driver"
-        force: true
-      #become: true
+    - name: Copy files
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/home/{{ ansible_env.USER }}/demo_usb_driver/"
+      with_list:
+        - Makefile
+        - src
 
     - name: Remove old kernel module
       command:
@@ -36,13 +30,13 @@
         chdir: "/home/{{ ansible_env.USER }}/demo_usb_driver/src"
       register: rmmod
       become: true
+      changed_when: "'not currently loaded' not in rmmod.stderr"
       failed_when: "'XXX' in rmmod.stderr"
 
     - name: Compile kernel module
       shell:
         cmd: make
         chdir: "/home/{{ ansible_env.USER }}/demo_usb_driver"
-      #become: true
 
     - name: Load kernel module
       command:
