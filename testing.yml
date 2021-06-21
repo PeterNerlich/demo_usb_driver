@@ -1,6 +1,11 @@
 ---
 - hosts: all
   tasks:
+    - name: Find out current kernel
+      command:
+        cmd: uname -r
+      register: kernel
+
     - name: Install dependencies
       apt:
         pkg:
@@ -13,30 +18,36 @@
           #- libcurl4-gnutls-dev
           #- zlib1g-dev
           #- libgmp-dev
+          - "linux-headers-{{ kernel.stdout }}"
         update_cache: true
         cache_valid_time: 86400  # One day
       become: true
 
     - name: Pull newest changes
       ansible.builtin.git:
-        repo: "https://github.com/PeterNerlich/demo_usb_driver.git"
-        dest: "~/module"
+        repo: https://github.com/PeterNerlich/demo_usb_driver.git
+        dest: "/home/{{ ansible_env.USER }}/demo_usb_driver"
         force: true
+      #become: true
+
+    - name: Remove old kernel module
+      command:
+        cmd: rmmod reduced.ko
+        chdir: "/home/{{ ansible_env.USER }}/demo_usb_driver/src"
+      register: rmmod
       become: true
+      failed_when: "'XXX' in rmmod.stderr"
 
     - name: Compile kernel module
-      community.general.make:
-        chdir: "~/module"
-      become: true
-
-    - name: Remove kernel module
-      command:
-        cmd: "rmmod reduced.ko"
-        chdir: "~/module/src"
-      failed_when: "'XXX' in result.stderr"
+      shell:
+        cmd: make
+        chdir: "/home/{{ ansible_env.USER }}/demo_usb_driver"
+      #become: true
 
     - name: Load kernel module
       command:
-        cmd: "insmod reduced.ko"
-        chdir: "~/module/src"
-      failed_when: "'No such file or directory' in result.stderr"
+        cmd: insmod reduced.ko
+        chdir: "/home/{{ ansible_env.USER }}/demo_usb_driver/src"
+      register: insmod
+      become: true
+      #failed_when: "'No such file or directory' in insmod.stderr"
