@@ -22,10 +22,6 @@
 #define MINOR_BASE    192
 
 /*********************OSR FX2 vendor commands************************/
-#define READ_7SEG     0xD4
-#define SET_7SEG      0xDB
-#define READ_LEDS     0xD7
-#define SET_LEDS      0xD8
 #define READ_SWITCHES 0xD6
 #define IS_HIGH_SPEED 0xD9
 
@@ -42,10 +38,6 @@ static void osrfx2_delete(struct kref * kref);
 static void write_bulk_callback(struct urb *urb);
 static void interrupt_handler(struct urb * urb);
 static ssize_t get_switches(struct device *dev, struct device_attribute *attr, char *buf);
-static ssize_t get_bargraph(struct device *dev, struct device_attribute *attr, char *buf);
-static ssize_t set_bargraph(struct device * dev, struct device_attribute *attr, const char *buf,size_t count);
-static ssize_t get_7segment(struct device *dev, struct device_attribute *attr, char *buf);
-static ssize_t set_7segment(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
 
 /***********************Module structures****************************/
 /*Table of devices that work with this driver*/
@@ -86,8 +78,6 @@ struct osrfx2 {
     struct kref kref;               /*Reference counter*/
 
     unsigned char switches;         /*Switch status*/
-    unsigned char segments;         /*7 segment status*/
-    unsigned char leds;             /*LEDs status*/
 
     atomic_t bulk_write_available;      /*Track usage of the bulk pipes*/
     atomic_t bulk_read_available;
@@ -128,10 +118,6 @@ static struct usb_class_driver osrfx2_class = {
 /***********************Module functions*****************************/
 /*Create device attribute switches*/
 static DEVICE_ATTR(switches, S_IRUGO, get_switches, NULL);
-/*Create device attribute bargraph*/
-static DEVICE_ATTR(bargraph, 0660, get_bargraph, set_bargraph);
-/*Create device attribute 7segment*/
-static DEVICE_ATTR(7segment, 0660, get_7segment, set_7segment);
 
 /*insmod*/
 int init_module(void) {
@@ -181,18 +167,6 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
 
     /*create sysfs attribute files for device components.*/
     retval = device_create_file(&intf->dev, &dev_attr_switches);
-    if (retval != 0) {
-        dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        if (fx2dev) kref_put( &fx2dev->kref, osrfx2_delete );
-        return retval;
-    }
-    retval = device_create_file(&intf->dev, &dev_attr_bargraph);
-    if (retval != 0) {
-        dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
-        if (fx2dev) kref_put( &fx2dev->kref, osrfx2_delete );
-        return retval;
-    }
-    retval = device_create_file(&intf->dev, &dev_attr_7segment);
     if (retval != 0) {
         dev_err(&intf->dev, "OSR FX2 device probe failed: %d.\n", retval);
         if (fx2dev) kref_put( &fx2dev->kref, osrfx2_delete );
@@ -311,8 +285,6 @@ static void osrfx2_disconnect(struct usb_interface * intf) {
 
     /*Remove sysfs files*/
     device_remove_file(&intf->dev, &dev_attr_switches);
-    device_remove_file(&intf->dev, &dev_attr_bargraph);
-    device_remove_file(&intf->dev, &dev_attr_7segment);
 
     /*Decrement usage count*/
     kref_put( &fx2dev->kref, osrfx2_delete );
@@ -614,159 +586,6 @@ static ssize_t get_switches(struct device *dev, struct device_attribute *attr, c
                     (fx2dev->switches & 0x01) ? "1" : "0");
 
     return retval;
-}
-
-/*Gets the LED bargraph status on the device*/
-static ssize_t get_bargraph(struct device *dev, struct device_attribute *attr, char *buf) {
-    struct usb_interface  *intf   = to_usb_interface(dev);
-    struct osrfx2         *fx2dev = usb_get_intfdata(intf);
-    int retval;
-   
-    if (fx2dev->suspended) {
-        return sprintf(buf, "S ");   /*Device is suspended*/
-    }
-
-    fx2dev->leds = 0;
-
-    /*Get LED values*/
-    retval = usb_control_msg(fx2dev->udev, usb_rcvctrlpipe(fx2dev->udev, 0),
-                             READ_LEDS, USB_DIR_IN | USB_TYPE_VENDOR, 0, 0,
-                             &fx2dev->leds, sizeof(fx2dev->leds),
-                             USB_CTRL_GET_TIMEOUT);
-
-    /*Fill buffer with LED status*/
-    retval = sprintf(buf, "%s%s%s%s%s%s%s%s",
-                     (fx2dev->leds & 0x10) ? "1" : "0",
-                     (fx2dev->leds & 0x08) ? "1" : "0",
-                     (fx2dev->leds & 0x04) ? "1" : "0",
-                     (fx2dev->leds & 0x02) ? "1" : "0",
-                     (fx2dev->leds & 0x01) ? "1" : "0",
-                     (fx2dev->leds & 0x80) ? "1" : "0",
-                     (fx2dev->leds & 0x40) ? "1" : "0",
-                     (fx2dev->leds & 0x20) ? "1" : "0");
-
-    return retval;
-}
-
-/*Sets the LED bargraph on the device*/
-static ssize_t set_bargraph(struct device * dev, struct device_attribute *attr, const char *buf,size_t count) {
-    struct usb_interface  *intf   = to_usb_interface(dev);
-    struct osrfx2         *fx2dev = usb_get_intfdata(intf);
-
-    unsigned int value;
-    int retval;
-    char *end;
-
-    fx2dev->leds = 0;
-
-    /*convert buffer to unsigned long*/
-    value = (simple_strtoul(buf, &end, 10) & 0xFF);
-    if (buf == end)
-        value = 0;
-
-    /*Check range of value 0 =< value < 256*/    
-    if(value > 255)
-        fx2dev->leds = 0;
-    else { /*convert to intuitive bit system. bit 0 = bottom, bit 7 = top*/
-        fx2dev->leds |= ((value >> 3) & 0x01);
-        fx2dev->leds |= ((value >> 3) & 0x02);
-        fx2dev->leds |= ((value >> 3) & 0x04);
-        fx2dev->leds |= ((value >> 3) & 0x08);
-        fx2dev->leds |= ((value >> 3) & 0x10);
-        fx2dev->leds |= ((value << 5) & 0x20);
-        fx2dev->leds |= ((value << 5) & 0x40);
-        fx2dev->leds |= ((value << 5) & 0x80);
-    }
-
-    /*Set LED values*/
-    retval = usb_control_msg(fx2dev->udev, usb_sndctrlpipe(fx2dev->udev, 0),
-                             SET_LEDS, USB_DIR_OUT | USB_TYPE_VENDOR, 0, 0,
-                             &fx2dev->leds, sizeof(fx2dev->leds),
-                             USB_CTRL_GET_TIMEOUT);
-
-    if (retval < 0)
-        dev_err(&fx2dev->udev->dev, "%s - retval=%d\n", __FUNCTION__, retval);
-
-    return count;
-}
-
-/*Gets the 7 segment status on the device*/
-static ssize_t get_7segment(struct device *dev, struct device_attribute *attr, char *buf) {
-    struct usb_interface  *intf   = to_usb_interface(dev);
-    struct osrfx2         *fx2dev = usb_get_intfdata(intf);
-    int retval;
-   
-    if (fx2dev->suspended) {
-        return sprintf(buf, "S ");   /*Device is suspended*/
-    }
-
-    fx2dev->segments = 0;
-
-    /*Get 7segment values*/
-    retval = usb_control_msg(fx2dev->udev, usb_rcvctrlpipe(fx2dev->udev, 0),
-                             READ_7SEG, USB_DIR_IN | USB_TYPE_VENDOR, 0, 0,
-                             &fx2dev->segments, sizeof(fx2dev->segments),
-                             USB_CTRL_GET_TIMEOUT);
-
-    if (retval < 0) {
-        dev_err(&fx2dev->udev->dev, "%s - retval=%d\n", __FUNCTION__, retval);
-        return retval;
-    }
-
-    /*Fill buffer with 7 segment status*/
-    retval = sprintf(buf, "%s%s%s%s%s%s%s%s",
-                     (fx2dev->segments & 0x08) ? "1" : "0",
-                     (fx2dev->segments & 0x20) ? "1" : "0",
-                     (fx2dev->segments & 0x40) ? "1" : "0",
-                     (fx2dev->segments & 0x10) ? "1" : "0",
-                     (fx2dev->segments & 0x80) ? "1" : "0",
-                     (fx2dev->segments & 0x04) ? "1" : "0",
-                     (fx2dev->segments & 0x02) ? "1" : "0",
-                     (fx2dev->segments & 0x01) ? "1" : "0");
-
-    return retval;
-}
-
-/*Set 7 segment display on device*/
-static ssize_t set_7segment(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
-    struct usb_interface  *intf   = to_usb_interface(dev);
-    struct osrfx2         *fx2dev = usb_get_intfdata(intf);
-
-    unsigned int value;
-    int retval;
-    char *end;
-
-    fx2dev->segments = 0;
-
-    /*convert buffer to unsigned long*/
-    value = (simple_strtoul(buf, &end, 10) & 0xFF);
-    if (buf == end)
-        value = 0;
-
-    /*Check range of value 0 =< value < 256*/    
-    if(value > 255)
-        fx2dev->segments = 0;
-    else { /*convert to intuitive bit system. bit 0 = seg a, bit 7 = decimal*/
-        fx2dev->segments |= (value & 0x01);
-        fx2dev->segments |= (value & 0x02);
-        fx2dev->segments |= (value & 0x04);
-        fx2dev->segments |= ((value >> 4) & 0x08);
-        fx2dev->segments |= (value & 0x10);
-        fx2dev->segments |= ((value >> 1) & 0x20);
-        fx2dev->segments |= ((value << 1) & 0x40);
-        fx2dev->segments |= ((value << 4) & 0x80);
-    }
-
-    /*Set values*/
-    retval = usb_control_msg(fx2dev->udev, usb_sndctrlpipe(fx2dev->udev, 0),
-                             SET_7SEG, USB_DIR_OUT | USB_TYPE_VENDOR, 0, 0,
-                             &fx2dev->segments, sizeof(fx2dev->segments),
-                             USB_CTRL_GET_TIMEOUT);
-
-    if (retval < 0)
-        dev_err(&fx2dev->udev->dev, "%s - retval=%d\n", __FUNCTION__, retval);
-
-    return count;
 }
 
 MODULE_DESCRIPTION("OSR FX2 Linux Driver");
