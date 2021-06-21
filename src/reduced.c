@@ -129,9 +129,9 @@ static struct usb_class_driver osrfx2_class = {
 /*Create device attribute switches*/
 static DEVICE_ATTR(switches, S_IRUGO, get_switches, NULL);
 /*Create device attribute bargraph*/
-static DEVICE_ATTR(bargraph, S_IRUGO | S_IWUGO, get_bargraph, set_bargraph);
+static DEVICE_ATTR(bargraph, 0660, get_bargraph, set_bargraph);
 /*Create device attribute 7segment*/
-static DEVICE_ATTR(7segment, S_IRUGO | S_IWUGO, get_7segment, set_7segment);
+static DEVICE_ATTR(7segment, 0660, get_7segment, set_7segment);
 
 /*insmod*/
 int init_module(void) {
@@ -140,7 +140,7 @@ int init_module(void) {
     retval = usb_register(&osrfx2_driver);
 
     if(retval)
-        err("usb_register failed. Error number %d", retval);
+        pr_err("usb_register failed. Error number %d", retval);
 
     return retval;
 }
