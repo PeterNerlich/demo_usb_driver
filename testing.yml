@@ -12,6 +12,7 @@
           - git
           - make
           - "linux-headers-{{ kernel.stdout }}"
+          - usbutils
         update_cache: true
         cache_valid_time: 86400  # One day
       become: true
