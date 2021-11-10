@@ -5,6 +5,7 @@
       command:
         cmd: uname -r
       register: kernel
+      changed_when: false
 
     - name: Install dependencies
       apt:
@@ -46,3 +47,12 @@
       register: insmod
       become: true
       #failed_when: "'No such file or directory' in insmod.stderr"
+
+
+    - name: Read dip switch status
+      slurp:
+        src: /sys/class/usbmisc/osrfx2_0/device/switches
+      register: slurpfile
+
+    - debug:
+        msg: "{{ slurpfile['content'] | b64decode }}"
