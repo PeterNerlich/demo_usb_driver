@@ -32,8 +32,6 @@ static ssize_t osrfx2_read(struct file * file, char * buffer, size_t count, loff
 static ssize_t osrfx2_write(struct file * file, const char * user_buffer, size_t count, loff_t * ppos);
 static int osrfx2_probe(struct usb_interface * interface, const struct usb_device_id * id);
 static void osrfx2_disconnect(struct usb_interface * interface);
-static int osrfx2_suspend(struct usb_interface * intf, pm_message_t message);
-static int osrfx2_resume(struct usb_interface * intf);
 static void osrfx2_delete(struct kref * kref);
 static void write_bulk_callback(struct urb *urb);
 static void interrupt_handler(struct urb * urb);
@@ -46,6 +44,7 @@ static const struct usb_device_id osrfx2_id_table [] = {
     { },
 };
 
+/* Create table for modules.usbmap, telling which devices this driver can handle */
 MODULE_DEVICE_TABLE(usb, osrfx2_id_table);
 
 /*OSR FX2 private device context structure*/
@@ -84,12 +83,10 @@ struct osrfx2 {
 
     size_t pending_data;            /*Data tracking for read write*/
 
-    int suspended;                  /*boolean*/
-
-    struct semaphore sem;           /*used during suspending and resuming device*/
     struct mutex io_mutex;          /*used during cleanup after disconnect*/
 };
 
+/* Declare device options and their respective routines in this driver */
 static const struct file_operations osrfx2_fops = {
     .owner   = THIS_MODULE,
     .open    = osrfx2_open,
@@ -98,12 +95,11 @@ static const struct file_operations osrfx2_fops = {
     .write   = osrfx2_write,
 };
 
+/* Declare probe and disconnect routines as well as id table */
 static struct usb_driver osrfx2_driver = {
     .name        = "osrfx2",
     .probe       = osrfx2_probe,
     .disconnect  = osrfx2_disconnect,
-    .suspend     = osrfx2_suspend,
-    .resume      = osrfx2_resume,
     .id_table    = osrfx2_id_table,
 };
 
@@ -136,6 +132,7 @@ void cleanup_module(void) {
     usb_deregister(&osrfx2_driver);
 }
 
+/* "Probe", e.g. attempt to connect the device, after enumeration */
 static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id * id) {
     struct usb_device *udev = interface_to_usbdev(intf);
     struct osrfx2 *fx2dev = NULL;
@@ -157,7 +154,6 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     /*Set initial fx2dev struct members*/
     kref_init( &fx2dev->kref );
     mutex_init(&fx2dev->io_mutex);
-    sema_init(&fx2dev->sem, 1);
     init_waitqueue_head(&fx2dev->FieldEventQueue);
     fx2dev->udev = usb_get_dev(udev);
     fx2dev->interface = intf;
@@ -266,6 +262,7 @@ static int osrfx2_probe(struct usb_interface * intf, const struct usb_device_id 
     return 0;
 }
 
+/* Handle device disconnect */
 static void osrfx2_disconnect(struct usb_interface * intf) {
     struct osrfx2 * fx2dev;
 
@@ -308,55 +305,6 @@ static void osrfx2_delete(struct kref * kref) {
         kfree(fx2dev->bulk_out_buffer);
 
     kfree(fx2dev);
-}
-
-/*Suspend device*/
-static int osrfx2_suspend(struct usb_interface * intf, pm_message_t message) {
-    struct osrfx2 * fx2dev = usb_get_intfdata(intf);
-
-    if (down_interruptible(&fx2dev->sem))
-        return -ERESTARTSYS;
-
-    fx2dev->suspended = 1;
-     
-    /*Stop the interrupt pipe read urb*/
-    usb_kill_urb(fx2dev->int_in_urb);
-
-    up(&fx2dev->sem);
-
-    return 0;
-}
-
-/*Wake up device*/
-static int osrfx2_resume(struct usb_interface * intf) {
-
-    int retval;
-    struct osrfx2 * fx2dev = usb_get_intfdata(intf);
-
-    if (down_interruptible(&fx2dev->sem))
-        return -ERESTARTSYS;
-    
-    fx2dev->suspended = 0;
-     
-     /*Re-start the interrupt pipe read urb*/
-    retval = usb_submit_urb( fx2dev->int_in_urb, GFP_KERNEL );
-    
-    if (retval) {
-        dev_err(&intf->dev, "%s - usb_submit_urb failed %d\n", __FUNCTION__, retval);
-
-        switch (retval) {
-        case -EHOSTUNREACH:
-            dev_err(&intf->dev, "%s - EHOSTUNREACH probable cause: "
-                    "parent hub/port still suspended.\n", __FUNCTION__);
-        default:
-            break;
-
-        }
-    }
-    
-    up(&fx2dev->sem);
-
-    return 0;
 }
 
 /*Open device for reading and writing*/
@@ -588,6 +536,6 @@ static ssize_t get_switches(struct device *dev, struct device_attribute *attr, c
     return retval;
 }
 
-MODULE_DESCRIPTION("OSR FX2 Linux Driver");
-MODULE_AUTHOR("Nick Mikstas");
+MODULE_DESCRIPTION("OSR FX2 Linux Driver, reduced to dip switches only");
+MODULE_AUTHOR("Nick Mikstas, modified by Peter Nerlich");
 MODULE_LICENSE("GPL");
